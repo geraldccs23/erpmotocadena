@@ -1,0 +1,7 @@
+{
+  "name": "MOTOCADENA ERP",
+  "description": "Integrated management system for MOTOCADENA Performance Workshop, featuring advanced CRM, inventory control, POS, and loyalty program with a high-performance racing aesthetic.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
