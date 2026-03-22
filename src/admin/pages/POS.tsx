@@ -37,6 +37,7 @@ const POS: React.FC = () => {
   const [pendingOrders, setPendingOrders] = useState<any[]>([]);
   const [exchangeRate, setExchangeRate] = useState<number>(1);
   const [exchangeLoading, setExchangeLoading] = useState(true);
+  const [workshopId, setWorkshopId] = useState<string | null>(null);
 
   // UI States
   const [loading, setLoading] = useState(true);
@@ -86,15 +87,18 @@ const POS: React.FC = () => {
   const fetchInitialData = async () => {
     setLoading(true);
     try {
-      const [pRes, sRes, cRes] = await Promise.all([
-        supabase.from('products').select('*').order('name'),
-        supabase.from('services').select('*').eq('is_active', true).order('name'),
-        supabase.from('customers').select('*').order('first_name')
+      const [pRes, sRes, cRes, wsRes] = await Promise.all([
+        (supabase.from('products') as any).select('*').order('name'),
+        (supabase.from('services') as any).select('*').eq('is_active', true).order('name'),
+        (supabase.from('customers') as any).select('*').order('first_name'),
+        (supabase.from('workshops') as any).select('id').limit(1)
       ]);
 
       setProducts(pRes.data || []);
       setServices(sRes.data || []);
       setCustomers(cRes.data || []);
+      if (wsRes.data && wsRes.data.length > 0) setWorkshopId(wsRes.data[0].id);
+
       fetchPendingWorkOrders();
     } finally {
       setLoading(false);
@@ -163,9 +167,8 @@ const POS: React.FC = () => {
   };
 
   const addAbono = () => {
-    if (!currentMethod || !currentAmountInput) return;
     const amount = parseFloat(currentAmountInput);
-    if (isNaN(amount) || amount <= 0) return;
+    if (!amount || amount <= 0 || !currentMethod) return;
 
     let amountUSD = 0;
     let amountBS = 0;
@@ -207,7 +210,15 @@ const POS: React.FC = () => {
 
     setProcessingPayment(true);
     try {
-      const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1).single();
+      // Use state instead of dynamic query
+      let currentWorkshopId = workshopId;
+      if (!currentWorkshopId) {
+        const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1);
+        if (ws && ws.length > 0) {
+          currentWorkshopId = ws[0].id;
+          setWorkshopId(currentWorkshopId);
+        }
+      }
 
       let finalSaleId: string | null = null;
       let finalOrderId: string | null = null;
@@ -232,7 +243,7 @@ const POS: React.FC = () => {
         if (!selectedCustomer) throw new Error("Debes asignar un piloto para la venta directa.");
 
         const { data: sale, error: sErr } = await (supabase.from('pos_sales') as any).insert([{
-          workshop_id: ws?.id,
+          workshop_id: currentWorkshopId,
           customer_id: selectedCustomer.id,
           seller_id: profile?.id,
           total_amount: subtotalUSD,
@@ -267,7 +278,8 @@ const POS: React.FC = () => {
       resetPOS();
       fetchPendingWorkOrders();
     } catch (err: any) {
-      alert(`Fallo en el sistema: ${err.message}`);
+      console.error("CRITICAL: handleProcessPayment failed", err);
+      alert(`Fallo en el sistema: ${err.message || 'Error desconocido'}`);
     } finally {
       setProcessingPayment(false);
       setShowPaymentModal(false);
@@ -278,10 +290,20 @@ const POS: React.FC = () => {
     e.preventDefault();
     setProcessingPayment(true);
     try {
-      const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1).single();
+      // Use state instead of dynamic query
+      let currentWorkshopId = workshopId;
+      if (!currentWorkshopId) {
+        const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1);
+        if (ws && ws.length > 0) {
+          currentWorkshopId = ws[0].id;
+          setWorkshopId(currentWorkshopId);
+        }
+      }
+
       const { data: newCust, error: cErr } = await (supabase.from('customers') as any).insert([{
         ...newCustomerData,
-        workshop_id: ws?.id
+        workshop_id: currentWorkshopId,
+        is_vip: false
       }]).select().single();
 
       if (cErr) throw cErr;
@@ -292,7 +314,8 @@ const POS: React.FC = () => {
       setNewCustomerData({ first_name: '', last_name: '', phone: '', id_number: '' });
       alert("✅ Piloto registrado exitosamente.");
     } catch (err: any) {
-      alert(`Error al registrar piloto: ${err.message}`);
+      console.error("CRITICAL: handleCreateCustomer (POS) failed", err);
+      alert(`Error al registrar piloto: ${err.message || 'Error de conexión'}`);
     } finally {
       setProcessingPayment(false);
     }

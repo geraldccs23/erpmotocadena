@@ -5,6 +5,7 @@ import { UserProfile, Role } from '../types';
 interface AuthContextType {
     user: any;
     profile: UserProfile | null;
+    workshopId: string | null;
     loading: boolean;
     hasRole: (roles: Role[]) => boolean;
     loginDemo: () => void;
@@ -20,130 +21,111 @@ const MOCK_PROFILE: UserProfile = {
     full_name: 'Staff Motocadena (Admin)',
     email: 'admin@motocadena.com',
     role: 'DIRECTOR',
-    is_active: true
+    is_active: true,
+    commission_rate: 0
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [user, setUser] = useState<any>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
+    const [workshopId, setWorkshopId] = useState<string | null>(null);
     const initialized = useRef(false);
+    const fetchingId = useRef<string | null>(null);
+    const abortRetryTimeout = useRef<any>(null);
 
-    const fetchProfile = useCallback(async (userId: string, email: string) => {
-        console.log("🔍 AuthContext: Fetching profile for", email);
-
-        // Safety timeout to prevent permanent hang
-        const timeoutId = setTimeout(() => {
-            if (loading) {
-                console.warn("⏱️ AuthContext: Profile fetch timed out, using fallback.");
-                setProfile({
-                    ...MOCK_PROFILE,
-                    id: userId,
-                    full_name: email.split('@')[0].toUpperCase(),
-                    email: email
-                });
-                setLoading(false);
-            }
-        }, 5000);
-
+    const discoverWorkshop = async () => {
         try {
-            const { data, error } = await supabase
-                .from('user_profiles')
-                .select('*')
-                .eq('id', userId)
-                .maybeSingle();
-
-            clearTimeout(timeoutId);
-
-            if (error) {
-                console.error("❌ AuthContext: Error fetching profile:", error);
-            }
-
+            const { data, error } = await (supabase.from('workshops') as any).select('id').limit(1).maybeSingle();
             if (data && !error) {
-                console.log("✅ AuthContext: Profile loaded:", data.full_name);
-                setProfile(data as UserProfile);
-            } else {
-                console.warn("⚠️ AuthContext: No profile in DB, using fallback.");
-                setProfile({
-                    ...MOCK_PROFILE,
-                    id: userId,
-                    full_name: email.split('@')[0].toUpperCase(),
-                    email: email
-                });
+                setWorkshopId(data.id);
             }
         } catch (e) {
+            console.error("❌ AuthContext: Failed workshop discovery:", e);
+        }
+    };
+
+    const fetchProfile = useCallback(async (userId: string, email: string) => {
+        if (fetchingId.current === userId) return;
+        fetchingId.current = userId;
+
+        const timeoutId = setTimeout(() => {
+            if (loading && fetchingId.current === userId) {
+                const fallback = { ...MOCK_PROFILE, id: userId, full_name: email.split('@')[0].toUpperCase(), email: email };
+                setProfile(fallback);
+                setWorkshopId(fallback.workshop_id);
+                setLoading(false);
+            }
+        }, 8000);
+
+        try {
+            const { data, error } = await (supabase.from('user_profiles') as any).select('*').eq('id', userId).maybeSingle();
             clearTimeout(timeoutId);
-            console.error("❌ AuthContext: Critical failure in fetchProfile:", e);
+
+            if (data && !error) {
+                setProfile(data as UserProfile);
+                setWorkshopId((data as any).workshop_id);
+            } else if (!error) {
+                await discoverWorkshop();
+            }
+        } catch (e: any) {
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError' || e.message?.includes('AbortError')) {
+                console.warn("⚠️ AuthContext: Fetch aborted. Retrying in 1.5s...");
+                if (abortRetryTimeout.current) clearTimeout(abortRetryTimeout.current);
+                abortRetryTimeout.current = setTimeout(() => {
+                    fetchingId.current = null;
+                    fetchProfile(userId, email);
+                }, 1500);
+                return;
+            }
         } finally {
-            setLoading(false);
+            if (fetchingId.current === userId) {
+                setLoading(false);
+                fetchingId.current = null;
+            }
         }
     }, [loading]);
 
     useEffect(() => {
-        console.log("🚀 AuthContext: Mounting Provider Effect");
+        if (user && !profile && !loading && !fetchingId.current) {
+            fetchProfile(user.id, user.email || '');
+        }
+    }, [user, profile, loading, fetchProfile]);
 
-        // Initial Auth Check
+    useEffect(() => {
         const initAuth = async () => {
             if (initialized.current) return;
             initialized.current = true;
-
-            console.log("🛠️ AuthContext: Initializing Auth state...");
-
-            if (localStorage.getItem('motocadena_demo_mode') === 'true') {
-                console.log("🕶️ AuthContext: Demo mode active");
-                setUser({ id: 'demo-user', email: 'demo@motocadena.com' });
-                setProfile(MOCK_PROFILE);
-                setLoading(false);
-                return;
-            }
-
             try {
-                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-                if (sessionError) console.error("❌ AuthContext: getSession error:", sessionError);
-
+                const { data: { session } } = await supabase.auth.getSession();
                 if (session?.user) {
-                    console.log("👤 AuthContext: Session found during init:", session.user.email);
                     setUser(session.user);
                     await fetchProfile(session.user.id, session.user.email || '');
                 } else {
-                    console.log("🚫 AuthContext: No session found during init.");
                     setLoading(false);
                 }
             } catch (e) {
-                console.error("❌ AuthContext: Error during initAuth:", e);
                 setLoading(false);
             }
         };
-
         initAuth();
 
-        console.log("📡 AuthContext: Setting up onAuthStateChange listener");
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log(`🔄 AuthContext: Event [${event}] for ${session?.user?.email || 'no-user'}`);
-
             if (session?.user) {
                 setUser(session.user);
                 if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
-                    console.log(`⚡ AuthContext: Triggering profile fetch for [${event}]`);
                     await fetchProfile(session.user.id, session.user.email || '');
                 }
             } else if (event === 'SIGNED_OUT') {
-                if (localStorage.getItem('motocadena_demo_mode') !== 'true') {
-                    console.log("👋 AuthContext: User signed out, clearing state");
-                    setUser(null);
-                    setProfile(null);
-                    setLoading(false);
-                }
-            } else {
-                // If we are initializing and have no session, make sure to stop loading
-                if (!session && loading) {
-                    setLoading(false);
-                }
+                setUser(null);
+                setProfile(null);
+                setWorkshopId(null);
+                setLoading(false);
             }
         });
 
         return () => {
-            console.log("🧹 AuthContext: Cleaning up AuthProvider");
             subscription.unsubscribe();
         };
     }, [fetchProfile]);
@@ -152,24 +134,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem('motocadena_demo_mode', 'true');
         setUser({ id: 'demo-user', email: 'demo@motocadena.com' });
         setProfile(MOCK_PROFILE);
+        setWorkshopId(MOCK_PROFILE.workshop_id);
         setLoading(false);
     };
 
     const logout = async () => {
-        console.log("🚪 AuthContext: Logging out...");
         setLoading(true);
         localStorage.removeItem('motocadena_demo_mode');
         await supabase.auth.signOut().catch(() => { });
         setUser(null);
         setProfile(null);
+        setWorkshopId(null);
         setLoading(false);
         window.location.hash = '#/admin/login';
     };
 
-    const hasRole = (roles: Role[]) => profile ? roles.includes(profile.role) : false;
+    const hasRole = (roles: Role[]) => {
+        if (user && !profile) return true; // Permissive while loading profile to avoid UI chop
+        return profile ? roles.includes(profile.role) : false;
+    };
 
     return (
-        <AuthContext.Provider value={{ user, profile, loading, hasRole, loginDemo, logout, fetchProfile }}>
+        <AuthContext.Provider value={{ user, profile, loading, workshopId, hasRole, loginDemo, logout, fetchProfile }}>
             {children}
         </AuthContext.Provider>
     );

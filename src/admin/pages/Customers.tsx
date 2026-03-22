@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserPlus, Search, Phone, Mail, Bike, ChevronRight, Star, X, Loader2, Save, Fingerprint, AlertTriangle, RefreshCcw, MapPin, Gift, Plus, Trash2, Hash, Settings } from 'lucide-react';
+import { Users, UserPlus, Search, Phone, Mail, Bike, ChevronRight, Star, X, Loader2, Fingerprint, Plus, Trash2, Hash } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { Customer, Vehicle } from '../types';
+import { Customer } from '../types';
 
 const Customers: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -11,6 +11,9 @@ const Customers: React.FC = () => {
   const [showVehicleModal, setShowVehicleModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+
+  // Form State Cliente
+  const [workshopId, setWorkshopId] = useState<string | null>(null);
 
   // Form State Cliente
   const [formData, setFormData] = useState({
@@ -37,11 +40,33 @@ const Customers: React.FC = () => {
   });
 
   useEffect(() => {
-    fetchCustomers();
+    fetchInitialData();
   }, []);
 
-  const fetchCustomers = async () => {
+  const fetchInitialData = async () => {
     setLoading(true);
+    try {
+      await Promise.all([
+        fetchCustomers(),
+        fetchMetadata()
+      ]);
+    } catch (err) {
+      console.error("Error loading initial data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMetadata = async () => {
+    try {
+      const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1);
+      if (ws && (ws as any[]).length > 0) setWorkshopId((ws as any[])[0].id);
+    } catch (err) {
+      console.error("Error fetching workshop ID:", err);
+    }
+  };
+
+  const fetchCustomers = async () => {
     try {
       const { data, error: supabaseError } = await supabase
         .from('customers')
@@ -55,8 +80,6 @@ const Customers: React.FC = () => {
       setCustomers((data as Customer[]) || []);
     } catch (err: any) {
       console.error("Error fetching customers:", err.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -64,15 +87,25 @@ const Customers: React.FC = () => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const { data: ws } = await supabase.from('workshops').select('id').limit(1).single();
+      // Intentar obtener el workshop_id si no lo tenemos todavía
+      let currentWorkshopId = workshopId;
+      if (!currentWorkshopId) {
+        const { data: ws } = await supabase.from('workshops').select('id').limit(1);
+        if (ws && ws.length > 0) {
+          currentWorkshopId = ws[0].id;
+          setWorkshopId(currentWorkshopId);
+        }
+      }
+
       const payload = {
         ...formData,
-        workshop_id: ws?.id,
-        referred_by_customer_id: formData.referred_by_customer_id || null
+        workshop_id: currentWorkshopId,
+        referred_by_customer_id: formData.referred_by_customer_id || null,
+        id_number: formData.id_number.trim() || null
       };
 
-      const { error: insertError } = await supabase
-        .from('customers')
+      const { error: insertError } = await (supabase
+        .from('customers') as any)
         .insert([payload]);
 
       if (insertError) throw insertError;
@@ -81,7 +114,8 @@ const Customers: React.FC = () => {
       resetCustomerForm();
       fetchCustomers();
     } catch (err: any) {
-      alert(`ERROR EN PITS: ${err.message}`);
+      console.error("CRITICAL: handleCreateCustomer failed", err);
+      alert(`ERROR EN PITS: ${err.message || 'Error de conexión'}`);
     } finally {
       setSubmitting(false);
     }
@@ -98,8 +132,8 @@ const Customers: React.FC = () => {
         plate: vehicleData.plate.toUpperCase().trim()
       };
 
-      const { error } = await supabase
-        .from('vehicles')
+      const { error } = await (supabase
+        .from('vehicles') as any)
         .insert([payload]);
 
       if (error) {

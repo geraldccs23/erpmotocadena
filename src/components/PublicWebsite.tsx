@@ -165,37 +165,48 @@ const PublicWebsite: React.FC<PublicWebsiteProps> = ({
       <LoyaltySection />
 
       {/* Memberships Section */}
-      <section id="membresias" className="py-24 relative overflow-hidden">
+      <section id="membresias" className="py-24 relative overflow-hidden bg-zinc-950">
+        <div className="absolute inset-0 z-0">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-amber-500/5 rounded-full blur-[150px]" />
+        </div>
         <div className="container mx-auto px-4 max-w-6xl relative z-10">
           <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-black heading-racing text-amber-500 mb-4">MEMBRESÍAS <span className="text-white">MOTOCADENA</span></h2>
-            <p className="text-zinc-400">Cuida tu inversión todo el año con nuestros planes de mantenimiento preventivo</p>
+            <Badge variant="warning" className="mb-4">PROGRAMA VIP</Badge>
+            <h2 className="text-5xl md:text-7xl font-black heading-racing text-white mb-6 tracking-tighter italic">MEMBRESÍAS <span className="text-amber-500 text-glow-amber">MOTOCADENA</span></h2>
+            <p className="text-zinc-400 text-lg max-w-2xl mx-auto">Cuida tu inversión todo el año. Todos los planes incluyen <strong className="text-white">2 Mantenimientos Generales por mes</strong>, prioridad en el taller y asesoría experta continua.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { name: 'Mensual', price: '$20', freq: 'mes', items: ['2 servicios básicos', '10% descuento MO extra', 'Prioridad de atención'] },
-              { name: 'Trimestral', price: '$40', freq: 'trimestre', items: ['6 servicios básicos', '15% descuento MO extra', 'Historial digital'] },
-              { name: 'Semestral', price: '$80', freq: 'semestre', items: ['12 servicios básicos', '20% descuento MO extra', 'Asesoría técnica'] },
-              { name: 'Anual', price: '$120', freq: 'año', items: ['24 servicios básicos', '25% descuento MO extra', 'Sorteos exclusivos'] },
+              { name: 'Mensual', price: '$30', freq: 'mes', total: '$30 total (1 mes)', bonus: 'Plan introductorio', features: ['2 Mantenimientos Generales/mes', 'Prioridad de atención', 'Atención por WhatsApp'] },
+              { name: 'Semestral', price: '$180', freq: 'semestre', total: 'Pago único de $180 (6 meses)', bonus: 'Cobertura garantizada', featured: true, features: ['12 Mantenimientos en 6 meses', 'Alta prioridad en taller', 'Asesoría técnica 24/7', 'Historial digital de servicio'] },
+              { name: 'Anual', price: '$360', freq: 'año', total: 'Pago único de $360 (12 meses)', bonus: 'Máximo rendimiento', features: ['24 Mantenimientos al año', 'Atención VIP inmediata', 'Asesoría premium continua', 'Sorteos exclusivos'] },
             ].map((plan, i) => (
-              <Card key={i} className="hover:border-amber-500/50 transition-all group">
-                <CardContent className="p-8">
-                  <h3 className="text-xs font-black uppercase tracking-[0.3em] text-zinc-500 mb-4">{plan.name}</h3>
-                  <div className="flex items-baseline gap-1 mb-8">
-                    <span className="text-4xl font-black text-white group-hover:text-amber-500 transition-colors">{plan.price}</span>
-                    <span className="text-xs text-zinc-500">/{plan.freq}</span>
+              <Card key={i} className={`relative overflow-hidden transition-all duration-500 group ${plan.featured ? 'border-amber-500 bg-black/80 scale-100 md:scale-105 shadow-[0_0_50px_rgba(245,158,11,0.2)]' : 'border-zinc-800 bg-black/50 hover:border-amber-500/50'}`}>
+                {plan.featured && (
+                  <div className="absolute top-0 right-0 bg-amber-500 text-black text-[10px] font-black tracking-widest uppercase px-4 py-1 rounded-bl-xl">
+                    MÁS POPULAR
                   </div>
-                  <ul className="space-y-4 mb-8">
-                    {plan.items.map((item, idx) => (
-                      <li key={idx} className="flex items-center gap-3 text-sm text-zinc-400">
-                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                )}
+                <CardContent className="p-10">
+                  <h3 className="text-sm font-black uppercase tracking-[0.3em] text-zinc-400 mb-2">{plan.name}</h3>
+                  <div className="mb-8">
+                    <div className="flex items-baseline gap-2 mb-1">
+                      <span className="text-6xl font-black heading-racing italic text-white group-hover:text-amber-500 transition-colors">{plan.price}</span>
+                      <span className="text-sm text-zinc-500 uppercase tracking-widest font-bold">/{plan.freq}</span>
+                    </div>
+                    <p className="text-xs text-amber-500 font-medium">{plan.total}</p>
+                  </div>
+                  <ul className="space-y-5 mb-10 min-h-[160px]">
+                    {plan.features.map((item, idx) => (
+                      <li key={idx} className="flex items-start gap-3 text-sm text-zinc-300 font-medium leading-tight">
+                        <Zap className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
                         {item}
                       </li>
                     ))}
                   </ul>
-                  <Button variant="outline" className="w-full text-[10px] h-10 tracking-widest font-black" onClick={() => window.open('https://wa.me/584147131270?text=Hola%20Motocadena,%20quiero%20activarme%20como%20miembro', '_blank')}>
-                    RESERVAR AHORA
+                  <Button variant={plan.featured ? 'primary' : 'outline'} className="w-full h-14 heading-racing text-xl italic tracking-wider" onClick={() => window.open(`https://wa.me/584147131270?text=Hola%20Motocadena,%20quiero%20suscribirme%20al%20plan%20de%20Membresia%20${plan.name.toUpperCase()}`, '_blank')}>
+                    ACTIVAR PLAN
                   </Button>
                 </CardContent>
               </Card>

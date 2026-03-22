@@ -368,13 +368,6 @@ const Inventory: React.FC = () => {
       }]) as any);
       if (mError) throw mError;
 
-      const { error: lError } = await (supabase.from('inventory_levels' as any).upsert({
-        product_id: selectedProduct.id,
-        warehouse_id: wh?.id,
-        stock: newStock
-      }, { onConflict: 'product_id,warehouse_id' }) as any);
-      if (lError) throw lError;
-
       setShowMovementModal(false);
       setSelectedProduct(null);
       setMovementForm({ type: 'IN', quantity: 1, notes: '' });

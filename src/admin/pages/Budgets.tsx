@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Plus, Search, FileText, Download, User, Calendar, Trash2, Loader2, Gauge, Bike, X, Link2, Printer, ChevronRight, DollarSign
+    Plus, Search, FileText, Download, User, Trash2, Loader2, Bike, X, Link2, Printer, ChevronRight, DollarSign
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -24,7 +24,7 @@ const STATUS_COLORS: Record<BudgetStatus, string> = {
 };
 
 const Budgets: React.FC = () => {
-    const { profile } = useAuth();
+    useAuth();
     const [budgets, setBudgets] = useState<Budget[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [services, setServices] = useState<Service[]>([]);
@@ -33,6 +33,7 @@ const Budgets: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [workshopId, setWorkshopId] = useState<string | null>(null);
 
     // Form State
     const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -45,62 +46,85 @@ const Budgets: React.FC = () => {
     const [items, setItems] = useState<Partial<BudgetItem>[]>([]);
 
     useEffect(() => {
-        fetchData();
+        let isMounted = true;
+        const load = async () => {
+            if (isMounted) await fetchData();
+        };
+        load();
+        return () => { isMounted = false; };
     }, []);
 
     useEffect(() => {
         const days = isNaN(validityDays) ? 0 : validityDays;
         const date = new Date();
         date.setDate(date.getDate() + days);
-        setValidUntil(date.toISOString().split('T')[0]); // Format for input type="date"
+        setValidUntil(date.toISOString().split('T')[0]);
     }, [validityDays]);
 
     const fetchData = async () => {
         setLoading(true);
-        console.log("🔍 Cargando datos de presupuestos...");
+        console.log("🔍 [DATA] Cargando datos iniciales...");
         try {
-            const { data: budgetsData, error: budgetsError } = await supabase
-                .from('budgets')
-                .select(`
-                    *,
-                    customer:customers(first_name, last_name, phone, id_number),
-                    vehicle:vehicles(brand, model, plate),
-                    items:budget_items(*)
-                `)
-                .order('created_at', { ascending: false });
-
-            if (budgetsError) {
-                console.error("❌ Error cargando presupuestos:", budgetsError);
-                throw budgetsError;
-            }
-
-            console.log(`✅ ${budgetsData?.length || 0} presupuestos cargados.`);
-
-            const [customersRes, servicesRes, productsRes] = await Promise.all([
-                supabase.from('customers').select('id, first_name, last_name, id_number, vehicles(*)').order('last_name'),
-                supabase.from('services').select('id, name, price').order('name'),
-                supabase.from('products').select('id, name, price').order('name')
-            ]);
-
-            if (customersRes.error) throw customersRes.error;
-            if (servicesRes.error) throw servicesRes.error;
-            if (productsRes.error) throw productsRes.error;
-
-            setBudgets((budgetsData as any) || []);
-            setCustomers(customersRes.data || []);
-            setServices(servicesRes.data || []);
-            setProducts(productsRes.data || []);
-            console.log("📁 Catálogos cargados correctamente.");
+            await fetchBudgets();
+            await fetchCatalogs();
+            await fetchMetadata();
         } catch (err: any) {
-            console.error("🚨 Error en fetchData:", err.message);
+            if (err.name === 'AbortError') {
+                console.warn("⚠️ [DATA] Carga abortada (navegación detectada).");
+            } else {
+                console.error("🚨 [DATA] Fallo en carga:", err.message || err);
+            }
         } finally {
             setLoading(false);
         }
     };
 
+    const fetchBudgets = async () => {
+        const { data: budgetsData, error: budgetsError } = await supabase
+            .from('budgets')
+            .select(`
+                *,
+                customer:customers(first_name, last_name, phone, id_number),
+                vehicle:vehicles(brand, model, plate),
+                items:budget_items(*)
+            `)
+            .order('created_at', { ascending: false });
+
+        if (budgetsError) throw budgetsError;
+        setBudgets((budgetsData as any) || []);
+        console.log(`✅ ${budgetsData?.length || 0} presupuestos cargados.`);
+    };
+
+    const fetchCatalogs = async () => {
+        const [customersRes, servicesRes, productsRes] = await Promise.all([
+            supabase.from('customers').select('id, first_name, last_name, id_number, vehicles(*)').order('last_name'),
+            supabase.from('services').select('id, name, price').order('name'),
+            supabase.from('products').select('id, name, price').order('name')
+        ]);
+
+        if (customersRes.error) throw customersRes.error;
+        if (servicesRes.error) throw servicesRes.error;
+        if (productsRes.error) throw productsRes.error;
+
+        setCustomers(customersRes.data || []);
+        setServices(servicesRes.data || []);
+        setProducts(productsRes.data || []);
+    };
+
+    const fetchMetadata = async () => {
+        try {
+            const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1);
+            if (ws && ws.length > 0) setWorkshopId(ws[0].id);
+        } catch (err) {
+            console.error("Error fetching workshop ID:", err);
+        }
+    };
+
     const handleAddItem = () => {
+        const id = Math.random().toString(36).substr(2, 9);
+        console.log("➕ [ITEMS] Agregando ítem temporal con ID:", id);
         setItems([...items, {
-            id: Math.random().toString(36).substr(2, 9),
+            id: id,
             service_id: undefined,
             product_id: undefined,
             description: '',
@@ -170,53 +194,64 @@ const Budgets: React.FC = () => {
         }
 
         setSubmitting(true);
-        console.log("💾 Iniciando guardado de presupuesto...");
+        console.log("💾 [PROCESS] Iniciando guardado de presupuesto...");
+
+        const createTimeout = (ms: number, name: string) => new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(`TIMEOUT_${name}`)), ms)
+        );
+
         try {
-            // Validate workshop_id (must be UUID)
-            const isUUID = (uuid: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
-            const workshopId = profile?.workshop_id && isUUID(profile.workshop_id) ? profile.workshop_id : null;
+            // Validate workshop_id
+            let currentWorkshopId = workshopId;
+            if (!currentWorkshopId) {
+                console.log("🔍 [PROCESS] WorkshopID faltante, buscando...");
+                const { data: ws } = await (supabase.from('workshops') as any).select('id').limit(1);
+                if (ws && ws.length > 0) {
+                    currentWorkshopId = ws[0].id;
+                    setWorkshopId(currentWorkshopId);
+                }
+            }
 
-            console.log("📝 Preparando datos para inserción de cabecera...", {
-                workshop_id: workshopId,
-                customer_id: selectedCustomerId,
-                vehicle_id: selectedVehicleId,
-                total_amount: totalAmount
-            });
-
-            // 1. Create Budget
+            // Prepare Payload (Sanitized)
             const budgetToInsert = {
-                workshop_id: workshopId,
+                workshop_id: currentWorkshopId || null,
                 customer_id: selectedCustomerId || null,
                 vehicle_id: selectedVehicleId || null,
-                manual_customer_name: manualCustomerName || null,
-                manual_vehicle_name: manualVehicleName || null,
-                valid_until: validUntil,
-                notes,
+                manual_customer_name: (manualCustomerName || '').trim().slice(0, 100) || null,
+                manual_vehicle_name: (manualVehicleName || '').trim().slice(0, 100) || null,
+                valid_until: (validUntil || '').trim() || null,
+                notes: (notes || '').trim() || null,
                 status: 'DRAFT' as const,
                 total_amount: totalAmount
             };
 
-            console.log("🚀 Enviando petición a Supabase (budgets)...");
-            const { data: budget, error: budgetError } = await (supabase
+            console.log("📝 [PROCESS] Payload Cabecera (Sanitized):", JSON.stringify(budgetToInsert, null, 2));
+
+            // 1. Create Budget
+            console.log("🚀 [PROCESS] Ejecutando INSERT en 'budgets'...");
+
+            // Remove race to see if native Supabase error triggers
+            const { data: budgetDataArr, error: budgetError } = await (supabase
                 .from('budgets') as any)
                 .insert([budgetToInsert])
-                .select()
-                .single();
+                .select('id');
 
             if (budgetError) {
-                console.error("❌ Error de Supabase en cabecera:", budgetError);
+                console.error("❌ [PROCESS] Error Supabase (Budgets):", budgetError);
                 throw budgetError;
             }
 
-            if (!budget) {
-                throw new Error("No se recibió confirmación del presupuesto creado.");
+            const budgetData = budgetDataArr as any[];
+            if (!budgetData || budgetData.length === 0) {
+                throw new Error("No se pudo obtener el ID del presupuesto (Array vacío).");
             }
 
-            console.log("✅ Presupuesto creado:", budget.id);
+            const createdBudget = budgetData[0];
+            console.log("✅ [PROCESS] Presupuesto creado con ID:", createdBudget.id);
 
             // 2. Create items
             const itemsToInsert = items.map(({ service_id, product_id, description, quantity, unit_price }) => ({
-                budget_id: budget.id,
+                budget_id: createdBudget.id,
                 service_id: service_id || null,
                 product_id: product_id || null,
                 description: description || '',
@@ -224,25 +259,36 @@ const Budgets: React.FC = () => {
                 unit_price: unit_price || 0
             }));
 
-            console.log("🚀 Enviando items a Supabase...", itemsToInsert);
-            const { error: itemsError } = await (supabase
-                .from('budget_items') as any)
-                .insert(itemsToInsert);
+            console.log("🚀 [PROCESS] Insertando", itemsToInsert.length, "ítems...");
+            const insertItemsPromise = (supabase.from('budget_items') as any).insert(itemsToInsert);
 
-            if (itemsError) {
-                console.error("❌ Error de Supabase en items:", itemsError);
-                throw itemsError;
+            const itemsRes: any = await Promise.race([
+                insertItemsPromise,
+                createTimeout(20000, 'INSERT_BUDGET_ITEMS')
+            ]);
+
+            if (itemsRes?.error) {
+                console.error("❌ [PROCESS] Error Supabase (Items):", JSON.stringify(itemsRes.error, null, 2));
+                throw itemsRes.error;
             }
 
-            console.log("🏁 Proceso completado exitosamente.");
+            console.log("🏁 [PROCESS] Guardado exitoso.");
             setShowModal(false);
             resetForm();
             fetchData();
+            alert("Presupuesto guardado con éxito.");
         } catch (err: any) {
-            console.error("🚨 Error crítico:", err);
-            alert(`Error al crear presupuesto: ${err.message || 'Error desconocido'} `);
+            console.error("🚨 [PROCESS] Error crítico:", err);
+            let userMessage = "Error al crear presupuesto.";
+            if (err.message?.includes('TIMEOUT')) {
+                userMessage = "Tiempo de espera agotado. El servidor no responde.";
+            } else if (err.message) {
+                userMessage = `Error: ${err.message}`;
+            }
+            alert(userMessage);
         } finally {
             setSubmitting(false);
+            console.log("🔄 [PROCESS] Estado reseteado.");
         }
     };
 

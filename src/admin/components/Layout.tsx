@@ -59,7 +59,6 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
   if (location.pathname === '/admin/login') return <>{children}</>;
-  if (!profile && !loading) return null;
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-black overflow-hidden">

@@ -50,14 +50,7 @@ const Login: React.FC = () => {
 
       if (data.user) {
         console.log("✅ Acceso concedido:", data.user.email);
-        // We wait a bit for AuthContext to detect the session
-        // but also manually check if we can proceed
-        setTimeout(() => {
-          if (localLoading) {
-            console.log("🔍 Login: Auto-check post-login success...");
-            navigate('/admin', { replace: true });
-          }
-        }, 1500);
+        // Relying on useEffect to handle the redirect once session is detected by useAuth
       } else {
         throw new Error("No user data returned after success.");
       }

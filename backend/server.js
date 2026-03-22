@@ -32,28 +32,26 @@ const PORT = process.env.PORT || 3003;
 const allowedOrigins = [
   'https://motocadena.com',
   'https://www.motocadena.com',
+  'https://admin.rg7.com.ve',
   'http://localhost:5173'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Permitir requests sin origin (como apps móviles o curl)
     if (!origin) return callback(null, true);
-
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
       callback(null, true);
     } else {
-      console.warn(`[CORS] Intento de acceso bloqueado desde origen no permitido: ${origin}`);
-      callback(null, false); // Denegar silenciosamente en lugar de lanzar Error
+      callback(null, false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Role'],
-  optionsSuccessStatus: 200 // Estado de éxito para el preflight (OPTIONS)
+  optionsSuccessStatus: 200
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Aumentar límite para snapshots grandes
 app.use(morgan('dev'));
 
 // Health & Diagnostics
@@ -65,7 +63,7 @@ app.get('/health', async (req, res) => {
     const dbStatus = error ? `Error: ${error.message}` : 'Connected';
     res.json({
       ok: true,
-      service: 'motocadena-backend',
+      service: 'rg7-admin-backend',
       db: dbStatus,
       latency: `${Date.now() - start}ms`,
       timestamp: new Date().toISOString()
@@ -75,22 +73,96 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Exchange Rate (Placeholder/Static for now)
-app.get('/admin/rate', (req, res) => {
-  res.json({ ok: true, exchange_rate: 60.0 }); // Default rate for testing
-});
-
-// Auth placeholder (no bloquea nada por ahora)
 app.use(authPlaceholder);
 
-// Admin Users Router (New)
-const adminUsersRouter = require('./src/routes/admin/users');
+// --------------------
+// Stock snapshot
+// payload: { branch, warehouses:[], captured_at, rows:[{co_art,co_alma,stock,descripcion}] }
+// writes to public.stock_snapshots + public.stock_snapshot_lines via supabase (service role)
+// --------------------
+app.post("/api/agent/stock_snapshot", async (req, res) => {
+  const { branch, warehouses, captured_at, rows } = req.body || {};
 
-// Soporte para ambos prefijos /admin y /api/admin
+  if (!branch || typeof branch !== "string") {
+    return res.status(400).json({ ok: false, error: "branch is required" });
+  }
+  if (!Array.isArray(rows)) {
+    return res.status(400).json({ ok: false, error: "rows must be array" });
+  }
+
+  try {
+    const capturedAt = captured_at ? new Date(captured_at).toISOString() : new Date().toISOString();
+
+    // 1. Insert Header
+    const { data: header, error: hError } = await supabase
+      .from('stock_snapshots')
+      .insert({
+        branch: branch.trim(),
+        captured_at: capturedAt,
+        warehouses: Array.isArray(warehouses) ? warehouses : [],
+        rows_count: rows.length,
+        source: 'PROFIT'
+      })
+      .select('id')
+      .single();
+
+    if (hError) throw hError;
+    const snapshot_id = header.id;
+
+    // 2. Prepare Lines
+    const linesToInsert = rows.map(r => {
+      const codigo_producto = ((r.co_art || r.codigo_producto || "").toString().trim()) || null;
+      const codigo_almacen = ((r.co_alma || r.codigo_almacen || "").toString().trim()) || null;
+      const stock = Number(r.stock);
+      const descripcion = ((r.descripcion || r.des_art || "").toString().trim()) || null;
+
+      const modeloRaw = r.modelo ?? null;
+      const modelo = modeloRaw !== null && modeloRaw !== undefined ? String(modeloRaw).trim() || null : null;
+
+      const refRaw = r.ref ?? null;
+      const ref = refRaw !== null && refRaw !== undefined ? String(refRaw).trim() || null : null;
+
+      if (!codigo_producto || !codigo_almacen || !Number.isFinite(stock)) return null;
+
+      return {
+        snapshot_id,
+        codigo_producto,
+        codigo_almacen,
+        stock,
+        descripcion,
+        modelo,
+        ref
+      };
+    }).filter(Boolean);
+
+    // 3. Bulk Insert Lines in Chunks
+    if (linesToInsert.length > 0) {
+      const chunkSize = 1000;
+      for (let i = 0; i < linesToInsert.length; i += chunkSize) {
+        const chunk = linesToInsert.slice(i, i + chunkSize);
+        const { error: lError } = await supabase
+          .from('stock_snapshot_lines')
+          .insert(chunk);
+
+        if (lError) throw lError;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      snapshot_id,
+      inserted_lines: linesToInsert.length,
+      rows_in_payload: rows.length
+    });
+  } catch (e) {
+    console.error('[Stock Snapshot Error]', e);
+    return res.status(500).json({ ok: false, error: e.message || String(e) });
+  }
+});
+
+// Routers mapping
 const adminPrefixes = ['/admin', '/api/admin'];
-
 adminPrefixes.forEach(prefix => {
-  app.use(prefix, adminUsersRouter);
   app.use(`${prefix}/clients`, adminClientsRouter);
   app.use(`${prefix}/vehicles`, adminVehiclesRouter);
   app.use(`${prefix}/mechanics`, adminMechanicsRouter);
@@ -115,5 +187,5 @@ app.use('/public/appointments', publicAppointmentsRouter);
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  console.log(`[motocadena-backend] listening on port ${PORT}`);
+  console.log(`[rg7-admin-backend] listening on port ${PORT}`);
 });
